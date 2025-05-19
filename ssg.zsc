@@ -1,0 +1,453 @@
+Class SSGFast : DoomWeapon Replaces SuperShotgun
+{
+    int slowSpeed, fastSpeed;
+    int fireThreshold;
+    int timeCnt, cooldownCnt;
+    int shotCnt;
+    int heatUpTotal;
+    float heatPercent;
+	Default
+	{
+		Weapon.SelectionOrder 400;
+		Weapon.AmmoUse 2;
+        Weapon.SlotNumber 3;
+		Weapon.AmmoGive 100;
+		Weapon.AmmoType "Shell";
+		Inventory.PickupMessage "You've got fast ssg!";
+		Obituary "$OB_MPSSHOTGUN";
+		Tag "$TAG_SUPERSHOTGUN";
+	}
+	States
+	{
+	Ready:
+		SHT2 A 1 {
+            A_Light0();
+            A_WeaponReady();
+            if(invoker.shotCnt > 0)
+            {
+                invoker.cooldownCnt += 1;
+                if(invoker.cooldownCnt >= 10)
+                {
+                    invoker.shotCnt -= 1;
+                    invoker.cooldownCnt = 0;
+                }
+            }
+        }
+		Loop;
+	Deselect:
+		SHT2 A 1 A_Lower;
+		Loop;
+	Select:
+		SHT2 A 1 {
+            A_Raise(24);
+            init();
+            SSGThinker.GetInstance().Init();
+            //console.printf("select");
+        }
+		Loop;
+	Fire:
+		SHT2 A 1 {
+            if(invoker.Ammo1.Amount > 0)
+            {
+                A_FireShotgun2();
+                invoker.timeCnt = 0;
+                if(invoker.shotCnt < invoker.heatUpTotal)
+                    invoker.shotCnt ++;
+                float t = (float)(invoker.shotCnt) / invoker.heatUpTotal;
+                t = 1 - (1-t)*(1-t);
+                invoker.fireThreshold = (int)(invoker.fastSpeed + (float)(invoker.slowSpeed - invoker.fastSpeed) * (float)(1 - t));
+                return ResolveState("Waiting");
+            }
+            else
+                return ResolveState("Ready");
+        }
+        Goto Waiting;
+
+    Waiting:
+        SHT2 A 1 
+        {
+            invoker.timeCnt ++;
+            if(invoker.timeCnt >= invoker.fireThreshold)
+            {
+                PlayerInfo p = players[consoleplayer].mo.player;
+                if(p.cmd.buttons & BT_ATTACK)
+                    return ResolveState("Fire");
+                else
+                {
+                    //invoker.shotCnt = 0;
+                    invoker.cooldownCnt = 0;
+                    return ResolveState("Ready");
+                }
+            }
+            else
+                return ResolveState(null);
+        }
+        Loop;
+	Flash:
+		SHT2 I 2 Bright A_Light1;
+        Stop;
+	Spawn:
+		SGN2 A -1;
+		Stop;
+	}
+    action void init()
+    {
+        invoker.shotCnt = 0;
+        invoker.slowSpeed = 30;
+        invoker.fastSpeed = 4;
+        invoker.heatUpTotal = 12;
+        invoker.fireThreshold = invoker.slowSpeed;
+        PlayerPawn p = (PlayerPawn)(invoker.Owner);
+        p.SetAmmoCapacity("Shell", 400);
+    }
+    action void doFire()
+    {
+        //console.printf("shotgun fire");
+        //console.printf("shotCnt: %d, fthhld: %d", invoker.shotCnt, invoker.fireThreshold);
+        A_FireShotgun2();
+        invoker.timeCnt = 0;
+        //console.printf("shotgun time: %d", invoker.shotCnt);
+        if(invoker.shotCnt < invoker.heatUpTotal)
+            invoker.shotCnt ++;
+        invoker.fireThreshold = (int)(invoker.fastSpeed + (invoker.slowSpeed - invoker.fastSpeed) * (float)(1 - invoker.shotCnt / invoker.heatUpTotal));
+        invoker.SetState(ResolveState("Waiting"));
+    }
+    action void CheckStreak()
+    {
+        invoker.timeCnt ++;
+        if(invoker.timeCnt >= invoker.fireThreshold)
+        {
+            //console.printf("ended");
+            invoker.shotCnt = 0;
+            //console.printf("stop shooting");
+            invoker.SetState(ResolveState("Ready"));
+        }
+    }
+    override void Tick()
+    {
+        if(heatUpTotal != 0)
+            heatPercent = (float)(shotCnt) / (float)(heatUpTotal);
+    }
+    override bool DepleteAmmo(bool altFire, bool checkEnough, int ammouse, bool forceammouse)
+    {
+        float t = (float)(shotCnt) / heatUpTotal;
+        checkEnough = true;
+        if (!(sv_infiniteammo || (Owner.FindInventory ('PowerInfiniteAmmo', true) != null)))
+		{
+            int ammoJudge;
+            if(t < 0.3)
+                ammoJudge = AmmoUse1;
+            else if(t < 0.6)
+                ammoJudge = AmmoUse1 / 2;
+            else
+                ammoJudge = 1;
+			if (checkEnough && !CheckAmmo (altFire ? AltFire : PrimaryFire, false, false, ammoJudge))
+			{
+                EventHandler.SendNetworkEvent("SSGFast_AmmoDepleted");
+				return false;
+			}
+			if (!altFire)
+			{
+				if (Ammo1 != null)
+				{
+					if (ammouse >= 0 && (bDehAmmo || forceammouse))
+					{
+                        if(t < 0.3)
+                            Ammo1.Amount -= 2;
+                        else if(t < 0.6)
+                            Ammo1.Amount -= 1;
+                        else
+                            Ammo1.Amount -= 1;
+						//Ammo1.Amount -= ammouse;
+					}
+					else
+					{
+                        if(t < 0.3)
+                            Ammo1.Amount -= AmmoUse1;
+                        else if(t < 0.6)
+                            Ammo1.Amount -= AmmoUse1/2;
+                        else
+                            Ammo1.Amount -= 1;
+						//Ammo1.Amount -= AmmoUse1;
+					}
+				}
+				if (bPRIMARY_USES_BOTH && Ammo2 != null)
+				{
+					Ammo2.Amount -= AmmoUse2;
+				}
+			}
+			else
+			{
+				if (Ammo2 != null)
+				{
+					Ammo2.Amount -= AmmoUse2;
+				}
+				if (bALT_USES_BOTH && Ammo1 != null)
+				{
+					Ammo1.Amount -= AmmoUse1;
+				}
+			}
+			if (Ammo1 != null && Ammo1.Amount < 0)
+				Ammo1.Amount = 0;
+			if (Ammo2 != null && Ammo2.Amount < 0)
+				Ammo2.Amount = 0;
+		}
+		return true;
+	}
+}
+Class SSGThinker : Thinker
+{
+    SSGFast w;
+    PlayerPawn p;
+    int lowTierKillCounter, killTargetNum;
+    int refillTime, refillCnt;
+    bool firing;
+    SSGThinker Init()
+    {
+        lowTierKillCounter = 0;
+        killTargetNum = 7;
+        refillTime = 25;
+        refillCnt = 0;
+        firing = false;
+        ChangeStatNum(STAT_USER);
+        return self;
+    }
+    static SSGThinker GetInstance()
+    {
+        ThinkerIterator it = ThinkerIterator.Create("SSGThinker", STAT_USER);
+        Thinker t = it.Next();
+        if(t)
+            return SSGThinker(t);
+        return new("SSGThinker").Init();
+    }
+    static clearscope SSGThinker GetClearInstance()
+    {
+        ThinkerIterator it = ThinkerIterator.Create("SSGThinker", STAT_USER);
+        Thinker t = it.Next();
+        if(t)
+            return SSGThinker(t);
+        return null;
+    }
+    override void Tick()
+    {
+        p = players[consoleplayer].mo;
+        //console.printf("firing: %d", firing);
+        if(p != null)
+        {
+            if(p.player.ReadyWeapon.getClassName() == "SSGFAST")
+                w = (SSGFast)(p.player.ReadyWeapon);
+            else
+                w = null;
+            if(w != null)
+            {
+                if(p.player.ReadyWeapon.getClassName() == "SSGFAST")
+                {
+                    if(w.heatPercent < 0.5)
+                        lowTierKillCounter = 0;
+                }
+            }
+            if(p.CountInv("SSGFast"))
+            {
+                w = (SSGFast)(p.FindInventory("SSGFast"));
+                if(w.Ammo1.Amount < 24)
+                {
+                    if(!firing)
+                        refillCnt++;
+                    if(refillCnt >= refillTime)
+                    {
+                        refillCnt = 0;
+                        w.Ammo1.Amount += 1;
+                    }
+                }
+            }
+        }
+        else
+            refillCnt = 0;
+    }
+    void checkKill(Actor monster)
+    {
+        int health = monster.GetMaxHealth();
+        if(health <= 200)
+        {
+            w = (SSGFast)(p.FindInventory("SSGFast"));
+            if(w != null)
+            {
+                if(w.heatPercent > 0.5)
+                    lowTierKillCounter++;
+            }
+            if(lowTierKillCounter >= killTargetNum)
+            {
+                //console.printf("give 2 ammo");
+                EventHandler.SendNetworkEvent("SSGFast_Give2Ammo");
+                lowTierKillCounter = 0;
+            }
+            else
+                ;//console.printf("lowTierKillCounter: %d", lowTierKillCounter);
+        }
+        else if(health >= 300 && health <= 450) //2 shot dead
+        {
+            //console.printf("give 4 ammo");
+            //give 4 ammo;
+            EventHandler.SendNetworkEvent("SSGFast_Give4Ammo");
+        }
+        else if(health >= 500 && health <= 600) //3 shot dead
+        {
+            //console.printf("give 6 ammo");
+            //give 6 ammo;
+            EventHandler.SendNetworkEvent("SSGFast_Give6Ammo");
+        }
+        else if(health >= 700 && health <= 1000) //4 and 5 shot dead
+        {
+            //console.printf("give 10 ammo");
+            //give 10 ammo;
+            EventHandler.SendNetworkEvent("SSGFast_Give10Ammo");
+        }
+        else if(health >= 1200)
+        {
+            //console.printf("fill all ammo");
+            //fill all ammo
+            EventHandler.SendNetworkEvent("SSGFast_Fill_All_Ammo");
+        }
+    }
+}
+Class SSG_GiveAmmoEvent : EventHandler
+{
+    PlayerPawn p;
+    override void NetworkProcess(ConsoleEvent e)
+    {
+        p = players[consoleplayer].mo;
+        if(p != null)
+        {
+            if(e.Name == "SSGFast_FillAmmo")
+            {
+                p.GiveInventory("Shell", 1);
+                SSGThinker.GetClearInstance().refillCnt = 0;
+            }
+            if(e.Name == "SSGFast_Give2Ammo")
+            {
+                p.GiveInventory("Shell", 4);
+            }
+            else if(e.Name == "SSGFast_Give4Ammo")
+            {
+                p.GiveInventory("Shell", 6);
+            }
+            else if(e.Name == "SSGFast_Give6Ammo")
+            {
+                p.GiveInventory("Shell", 8);
+            }
+            else if(e.Name == "SSGFast_Give10Ammo")
+            {
+                p.GiveInventory("Shell", 18);
+            }
+            else if(e.Name == "SSGFast_Fill_All_Ammo")
+            {
+                p.GiveInventory("Shell", 400);
+            }
+
+            if(e.Name == "Mouse_FirePressed")
+            {
+                SSGThinker.GetClearInstance().firing = true;
+            }
+            if(e.Name == "Mouse_FireReleased")
+            {
+                SSGThinker.GetClearInstance().firing = false;
+            }
+            if(e.Name == "SSGFast_AmmoDepleted")
+            {
+                SSGThinker.GetClearInstance().refillCnt = 0;
+            }
+        }
+    }
+    override bool InputProcess(InputEvent e)
+	{
+        if(e.KeyScan == InputEvent.Key_Mouse1 && e.Type == InputEvent.Type_KeyDown)
+        {
+            EventHandler.SendNetworkEvent("Mouse_FirePressed");
+        }
+        if(e.KeyScan == InputEvent.Key_Mouse1 && e.Type == InputEvent.Type_KeyUp)
+        {
+            EventHandler.SendNetworkEvent("Mouse_FireReleased");
+        }
+        return false;
+	}
+}
+Class SSGSetup : EventHandler
+{
+    override void WorldLoaded(WorldEvent e)
+    {
+        SSGThinker.GetInstance();
+    }
+}
+Class MonsterDeathEventHandler : EventHandler 
+{
+    SSGThinker ssg;
+    override void WorldThingDamaged(WorldEvent e)
+    {
+        ssg = SSGThinker.GetClearInstance();
+        if(e.thing.health <= 0)
+        {
+            //console.printf("%s did a kill.", e.DamageSource.getClass());
+            if(e.DamageSource != null && e.DamageSource is "PlayerPawn")
+            {
+                ssg.checkKill(e.thing);
+                //console.printf("Player did a kill.");
+            }
+        }
+    }
+}
+Class SSGDebugInfo : EventHandler
+{
+    override void RenderOverlay(RenderEvent e)
+    {
+        if(AutoMapActive)
+            return ;
+        HUDFont font = HUDFont.Create(bigFont);
+        //PlayerPawn p = players[consoleplayer].mo;
+        PlayerInfo p = players[consoleplayer].mo.player;
+        Statusbar.BeginHUD();
+        if(p != null)
+		{
+			if(p.ReadyWeapon.getClassName() == "SSGFAST")
+			{
+                int barTotal = 20;
+                SSGFast w = (SSGFast)(p.ReadyWeapon);
+                string emptybar = "Heat[";
+                string heatSink = "";
+                int progressbar = barTotal * (float)(w.shotCnt) / (float)(w.heatUpTotal);
+                //console.printf("progressbar: %d", progressbar);
+                for(int i=1; i<=progressbar; i++)
+                {
+                    switch(i/4)
+                    {
+                        case 0:
+                            heatSink.AppendFormat("\cu=");
+                            break;
+                        case 1:
+                            heatSink.AppendFormat("\cn=");
+                            break;
+                        case 2:
+                            heatSink.AppendFormat("\cv=");
+                            break;
+                        case 3:
+                            heatSink.AppendFormat("\cy=");
+                            break;
+                        default:
+                            heatSink.AppendFormat("\ct=");
+                            break;
+                    }
+                }
+                if(progressbar == barTotal)
+                    heatSink.AppendFormat("\cf>>");
+                for(int i=1; i<=barTotal; i++)
+                    emptybar.AppendFormat(" ");
+                emptybar.AppendFormat("]");
+                Statusbar.DrawString(font, emptybar, (-420, -140), 
+                    Statusbar.DI_SCREEN_RIGHT_BOTTOM | Statusbar.DI_TEXT_ALIGN_CENTER,
+                    1);
+                Statusbar.DrawString(font, heatSink, (-460, -140), 
+                    Statusbar.DI_SCREEN_RIGHT_BOTTOM | Statusbar.DI_TEXT_ALIGN_LEFT,
+                    1);
+            }
+        }
+    }
+}
